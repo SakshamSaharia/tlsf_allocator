@@ -91,12 +91,12 @@ const void* TLSFAllocator::block_to_ptr(const Block* block) noexcept {
 
 TLSFAllocator::Block* TLSFAllocator::block_next(Block* block) noexcept {
     return reinterpret_cast<Block*>(reinterpret_cast<std::byte*>(block) +
-                                    BLOCK_HEADER_OVERHEAD + block_size(block));
+                                    BLOCK_HEADER_SIZE + block_size(block));
 }
 
 const TLSFAllocator::Block* TLSFAllocator::block_next(const Block* block) noexcept {
     return reinterpret_cast<const Block*>(reinterpret_cast<const std::byte*>(block) +
-                                          BLOCK_HEADER_OVERHEAD + block_size(block));
+                                          BLOCK_HEADER_SIZE + block_size(block));
 }
 
 std::size_t* TLSFAllocator::block_footer(Block* block) noexcept {
@@ -118,9 +118,9 @@ TLSFAllocator::Block* TLSFAllocator::block_prev(const Block* block) noexcept {
     assert(block_is_prev_free(block));
     const std::size_t previous_size = *reinterpret_cast<const std::size_t*>(
         reinterpret_cast<const std::byte*>(block) - sizeof(std::size_t));
-    assert(previous_size >= BLOCK_SIZE_MIN);
+    assert(previous_size >= MIN_FREE_BLOCK_BODY_SIZE);
     return reinterpret_cast<Block*>(reinterpret_cast<std::byte*>(const_cast<Block*>(block)) -
-                                    BLOCK_HEADER_OVERHEAD - previous_size);
+                                    BLOCK_HEADER_SIZE - previous_size);
 }
 
 std::size_t TLSFAllocator::adjust_request_size(std::size_t size, std::size_t align) noexcept {
@@ -128,31 +128,31 @@ std::size_t TLSFAllocator::adjust_request_size(std::size_t size, std::size_t ali
     if (size > std::numeric_limits<std::size_t>::max() - (align - 1)) return 0;
     const std::size_t aligned = align_up(size, align);
     if (aligned >= BLOCK_SIZE_MAX) return 0;
-    return std::max(aligned, BLOCK_SIZE_MIN);
+    return std::max(aligned, MIN_FREE_BLOCK_BODY_SIZE);
 }
 
-int TLSFAllocator::ffs32(std::uint32_t word) noexcept {
+int TLSFAllocator::first_set_bit(std::uint32_t word) noexcept {
     return word ? static_cast<int>(std::countr_zero(word)) : -1;
 }
 
-int TLSFAllocator::fls_size(std::size_t size) noexcept {
+int TLSFAllocator::highest_set_bit(std::size_t size) noexcept {
     return size ? static_cast<int>(std::bit_width(size) - 1) : -1;
 }
 
-void TLSFAllocator::mapping_insert(std::size_t size, int& fl, int& sl) noexcept {
+void TLSFAllocator::map_size_to_bucket(std::size_t size, int& fl, int& sl) noexcept {
     if (size < SMALL_BLOCK_SIZE) {
         fl = 0;
         sl = static_cast<int>(size / (SMALL_BLOCK_SIZE / SL_INDEX_COUNT));
     } else {
-        fl = fls_size(size);
+        fl = highest_set_bit(size);
         sl = static_cast<int>((size >> (fl - SL_INDEX_COUNT_LOG2)) ^ SL_INDEX_COUNT);
         fl -= (FL_INDEX_SHIFT - 1);
     }
 }
 
-void TLSFAllocator::mapping_search(std::size_t size, int& fl, int& sl) noexcept {
+void TLSFAllocator::map_rounded_size_to_bucket(std::size_t size, int& fl, int& sl) noexcept {
     if (size >= SMALL_BLOCK_SIZE) {
-        const int shift = fls_size(size) - SL_INDEX_COUNT_LOG2;
+        const int shift = highest_set_bit(size) - SL_INDEX_COUNT_LOG2;
         if (shift >= 0) {
             const std::size_t round = (std::size_t{1} << shift) - 1;
             if (size > std::numeric_limits<std::size_t>::max() - round) {
@@ -163,7 +163,7 @@ void TLSFAllocator::mapping_search(std::size_t size, int& fl, int& sl) noexcept 
             size += round;
         }
     }
-    mapping_insert(size, fl, sl);
+    map_size_to_bucket(size, fl, sl);
 }
 
 void TLSFAllocator::control_construct() noexcept {
@@ -174,7 +174,27 @@ void TLSFAllocator::control_construct() noexcept {
     control_->sl_bitmap.fill(0);
 }
 
-void TLSFAllocator::remove_free(Block* block, int fl, int sl) noexcept {
+void TLSFAllocator::block_insert_free(Block* block) noexcept {
+    assert(block_is_free(block));
+    write_footer(block);
+
+    int fl = 0, sl = 0;
+    map_size_to_bucket(block_size(block), fl, sl);
+    Block* current = control_->blocks[fl][sl];
+    block->next_free = current;
+    block->prev_free = &control_->block_null;
+    current->prev_free = block;
+    control_->blocks[fl][sl] = block;
+    control_->fl_bitmap |= (std::uint32_t{1} << fl);
+    control_->sl_bitmap[fl] |= (std::uint32_t{1} << sl);
+}
+
+void TLSFAllocator::block_remove_free(Block* block) noexcept {
+    assert(block_is_free(block));
+
+    int fl = 0, sl = 0;
+    map_size_to_bucket(block_size(block), fl, sl);
+
     Block* prev = block->prev_free;
     Block* next = block->next_free;
     assert(prev && next);
@@ -192,69 +212,45 @@ void TLSFAllocator::remove_free(Block* block, int fl, int sl) noexcept {
     }
 }
 
-void TLSFAllocator::insert_free(Block* block) noexcept {
-    assert(block_is_free(block));
-    write_footer(block);
-    int fl = 0, sl = 0;
-    mapping_insert(block_size(block), fl, sl);
-    Block* current = control_->blocks[fl][sl];
-    block->next_free = current;
-    block->prev_free = &control_->block_null;
-    current->prev_free = block;
-    control_->blocks[fl][sl] = block;
-    control_->fl_bitmap |= (std::uint32_t{1} << fl);
-    control_->sl_bitmap[fl] |= (std::uint32_t{1} << sl);
-}
-/// AAA refactoring required here 
-void TLSFAllocator::block_insert(Block* block) noexcept {
-    insert_free(block);
-}
-
-void TLSFAllocator::block_remove(Block* block) noexcept {
-    int fl = 0, sl = 0;
-    mapping_insert(block_size(block), fl, sl);
-    remove_free(block, fl, sl);
-}
-
-TLSFAllocator::Block* TLSFAllocator::search_suitable(int& fl, int& sl) noexcept {
+TLSFAllocator::Block* TLSFAllocator::find_next_nonempty_bucket(int& fl, int& sl) noexcept {
     std::uint32_t sl_map = control_->sl_bitmap[fl] & (~std::uint32_t{0} << sl);
     if (!sl_map) {
         const std::uint32_t fl_map = control_->fl_bitmap &
                                       (~std::uint32_t{0} << (fl + 1));
         if (!fl_map) return nullptr;
-        fl = ffs32(fl_map);
+        fl = first_set_bit(fl_map);
         sl_map = control_->sl_bitmap[fl];
     }
-    sl = ffs32(sl_map);
+    sl = first_set_bit(sl_map);
     return control_->blocks[fl][sl];
 }
 
-TLSFAllocator::Block* TLSFAllocator::locate_free(std::size_t size) noexcept {
+TLSFAllocator::Block* TLSFAllocator::find_free_block(std::size_t size) noexcept {
     int fl = 0, sl = 0;
     if (!size) return nullptr;
-    mapping_search(size, fl, sl);
+    map_rounded_size_to_bucket(size, fl, sl);
     if (fl >= static_cast<int>(FL_INDEX_COUNT)) return nullptr;
-    Block* block = search_suitable(fl, sl);
+    Block* block = find_next_nonempty_bucket(fl, sl);
     if (block) {
         assert(block_size(block) >= size);
-        block_remove(block);
+        block_remove_free(block);
     }
     return block;
 }
 
 bool TLSFAllocator::block_can_split(const Block* block, std::size_t size) noexcept {
-    return block_size(block) >= size + SPLIT_MIN_PHYSICAL;
+    return block_size(block) >= size + MIN_FREE_BLOCK_SIZE;
 }
 
 TLSFAllocator::Block* TLSFAllocator::block_split(Block* block, std::size_t size) noexcept {
     const bool was_free = block_is_free(block);
     const std::size_t old_size = block_size(block);
     // this is just block_can_split()
-    assert(old_size >= size + SPLIT_MIN_PHYSICAL);
+    assert(old_size >= size + MIN_FREE_BLOCK_SIZE);
 
     Block* remaining = reinterpret_cast<Block*>(
-        reinterpret_cast<std::byte*>(block) + BLOCK_HEADER_OVERHEAD + size);
-    const std::size_t remain_size = old_size - size - BLOCK_HEADER_OVERHEAD;
+        reinterpret_cast<std::byte*>(block) + BLOCK_HEADER_SIZE + size);
+    const std::size_t remain_size = old_size - size - BLOCK_HEADER_SIZE;
 
     block_set_size(remaining, remain_size);
     block_set_free(remaining);
@@ -278,7 +274,7 @@ TLSFAllocator::Block* TLSFAllocator::block_split(Block* block, std::size_t size)
 TLSFAllocator::Block* TLSFAllocator::block_absorb(Block* prev, Block* block) noexcept {
     assert(!block_is_last(prev));
     const bool result_free = block_is_free(prev);
-    prev->size = (block_size(prev) + block_size(block) + BLOCK_HEADER_OVERHEAD) |
+    prev->size = (block_size(prev) + block_size(block) + BLOCK_HEADER_SIZE) |
                  (prev->size & FLAG_MASK);
     if (result_free) write_footer(prev);
     return prev;
@@ -288,7 +284,7 @@ TLSFAllocator::Block* TLSFAllocator::merge_prev(Block* block) noexcept {
     if (block_is_prev_free(block)) {
         Block* prev = block_prev(block);
         assert(prev && block_is_free(prev));
-        block_remove(prev);
+        block_remove_free(prev);
         block = block_absorb(prev, block);
     }
     return block;
@@ -297,7 +293,7 @@ TLSFAllocator::Block* TLSFAllocator::merge_prev(Block* block) noexcept {
 TLSFAllocator::Block* TLSFAllocator::merge_next(Block* block) noexcept {
     Block* next = block_next(block);
     if (block_is_free(next)) {
-        block_remove(next);
+        block_remove_free(next);
         block = block_absorb(block, next);
     }
     return block;
@@ -308,7 +304,7 @@ void TLSFAllocator::trim_free(Block* block, std::size_t size) noexcept {
     if (block_can_split(block, size)) {
         Block* remaining = block_split(block, size);
         block_set_prev_free(remaining);
-        block_insert(remaining);
+        block_insert_free(remaining);
     }
 }
 
@@ -318,17 +314,17 @@ void TLSFAllocator::trim_used(Block* block, std::size_t size) noexcept {
         Block* remaining = block_split(block, size);
         block_set_prev_used(remaining);
         remaining = merge_next(remaining);
-        block_insert(remaining);
+        block_insert_free(remaining);
     }
 }
 
 TLSFAllocator::Block* TLSFAllocator::trim_free_leading(Block* block, std::size_t size) noexcept {
     Block* remaining = block;
     if (block_can_split(block, size)) {
-        remaining = block_split(block, size - BLOCK_HEADER_OVERHEAD);
+        remaining = block_split(block, size - BLOCK_HEADER_SIZE);
         block_set_prev_used(block);
         block_set_prev_free(remaining);
-        block_insert(block);
+        block_insert_free(block);
     }
     return remaining;
 }
@@ -349,17 +345,17 @@ TLSFAllocator::Pool TLSFAllocator::add_pool(void* mem, std::size_t bytes) noexce
     // otherwise we could have just aligned this up
     // but then maybe this would be ugly for the user's side
     if (reinterpret_cast<std::uintptr_t>(mem) % ALIGN_SIZE) return {};
-    if (bytes < pool_overhead()) return {};
+    if (bytes < MIN_POOL_SIZE) return {};
 
-    const std::size_t pool_bytes = align_down(bytes - pool_overhead(), ALIGN_SIZE);
-    if (pool_bytes < BLOCK_SIZE_MIN || pool_bytes > BLOCK_SIZE_MAX) return {};
+    const std::size_t pool_bytes = align_down(bytes - POOL_OVERHEAD, ALIGN_SIZE);
+    if (pool_bytes < MIN_FREE_BLOCK_BODY_SIZE || pool_bytes > BLOCK_SIZE_MAX) return {};
 
     Block* block = reinterpret_cast<Block*>(mem);
     block->size = pool_bytes;
     block_set_prev_used(block);
     block_set_free(block);
     write_footer(block);
-    block_insert(block);
+    block_insert_free(block);
 
     Block* sentinel = block_next(block);
     sentinel->size = 0;
@@ -374,13 +370,13 @@ bool TLSFAllocator::remove_pool(Pool pool) noexcept {
     Block* first = reinterpret_cast<Block*>(pool.mem);
     Block* sentinel = block_next(first);
     if (!block_is_free(first) || !block_is_last(sentinel) || block_is_free(sentinel)) return false;
-    block_remove(first);
+    block_remove_free(first);
     return true;
 }
 
 void* TLSFAllocator::allocate(std::size_t bytes) noexcept {
     const std::size_t adjust = adjust_request_size(bytes, ALIGN_SIZE);
-    return prepare_used(locate_free(adjust), adjust);
+    return prepare_used(find_free_block(adjust), adjust);
 }
 
 void* TLSFAllocator::allocate_aligned(std::size_t bytes, std::size_t alignment) noexcept {
@@ -389,30 +385,30 @@ void* TLSFAllocator::allocate_aligned(std::size_t bytes, std::size_t alignment) 
     if (!adjust) return nullptr;
 
     const std::size_t max_size = std::numeric_limits<std::size_t>::max();
-    if (alignment > max_size - FREE_LEADING_GAP_MIN) return nullptr;
-    if (adjust > max_size - alignment - FREE_LEADING_GAP_MIN) return nullptr;
+    if (alignment > max_size - MIN_FREE_BLOCK_SIZE) return nullptr;
+    if (adjust > max_size - alignment - MIN_FREE_BLOCK_SIZE) return nullptr;
 
     const std::size_t size_with_gap =
-        adjust_request_size(adjust + alignment + FREE_LEADING_GAP_MIN, alignment);
+        adjust_request_size(adjust + alignment + MIN_FREE_BLOCK_SIZE, alignment);
     if (!size_with_gap) return nullptr;
 
     const std::size_t aligned_size = alignment > ALIGN_SIZE ? size_with_gap : adjust;
-    Block* block = locate_free(aligned_size);
+    Block* block = find_free_block(aligned_size);
     if (!block) return nullptr;
 
     void* ptr = block_to_ptr(block);
     std::uintptr_t aligned_addr = align_ptr(reinterpret_cast<std::uintptr_t>(ptr), alignment);
     std::size_t gap = static_cast<std::size_t>(aligned_addr - reinterpret_cast<std::uintptr_t>(ptr));
 
-    if (gap && gap < FREE_LEADING_GAP_MIN) {
-        const std::size_t gap_remain = FREE_LEADING_GAP_MIN - gap;
+    if (gap && gap < MIN_FREE_BLOCK_SIZE) {
+        const std::size_t gap_remain = MIN_FREE_BLOCK_SIZE - gap;
         const std::size_t offset = std::max(gap_remain, alignment);
         aligned_addr = align_ptr(aligned_addr + offset, alignment);
         gap = static_cast<std::size_t>(aligned_addr - reinterpret_cast<std::uintptr_t>(ptr));
     }
 
     if (gap) {
-        assert(gap >= FREE_LEADING_GAP_MIN);
+        assert(gap >= MIN_FREE_BLOCK_SIZE);
         block = trim_free_leading(block, gap);
     }
 
@@ -429,7 +425,7 @@ void TLSFAllocator::deallocate(void* ptr) noexcept {
     block_set_prev_free(next);
     block = merge_prev(block);
     block = merge_next(block);
-    block_insert(block);
+    block_insert_free(block);
 }
 
 void* TLSFAllocator::reallocate(void* ptr, std::size_t size) noexcept {
@@ -444,10 +440,8 @@ void* TLSFAllocator::reallocate(void* ptr, std::size_t size) noexcept {
     Block* next = block_next(block);
     const std::size_t cursize = block_size(block);
     const std::size_t next_size = block_size(next);
-    if (cursize > std::numeric_limits<std::size_t>::max() - next_size - BLOCK_HEADER_OVERHEAD) {
-        return nullptr;
-    }
-    const std::size_t combined = cursize + next_size + BLOCK_HEADER_OVERHEAD;
+    assert(cursize <= std::numeric_limits<std::size_t>::max() - next_size - BLOCK_HEADER_SIZE);
+    const std::size_t combined = cursize + next_size + BLOCK_HEADER_SIZE;
     const std::size_t adjust = adjust_request_size(size, ALIGN_SIZE);
     if (!adjust) return nullptr;
 
@@ -462,8 +456,9 @@ void* TLSFAllocator::reallocate(void* ptr, std::size_t size) noexcept {
 
     if (adjust > cursize) {
         merge_next(block);
-        // The successor used to have PREV_FREE_BIT set because the absorbed
-        // block was free. The enlarged block is now used.
+        // the successor used to have prev free bit set because the absorbed
+        // block was free.
+        // the enlarged block is now used.
         block_set_prev_used(block_next(block));
         block_set_used(block);
     }
@@ -477,19 +472,19 @@ std::size_t TLSFAllocator::block_size(const void* ptr) noexcept {
 }
 
 std::size_t TLSFAllocator::usable_bytes(Pool pool) const noexcept {
-    if (!pool.mem || pool.bytes < pool_overhead()) return 0;
-    return align_down(pool.bytes - pool_overhead(), ALIGN_SIZE);
+    if (!pool.mem || pool.bytes < MIN_POOL_SIZE) return 0;
+    return align_down(pool.bytes - POOL_OVERHEAD, ALIGN_SIZE);
 }
 
 TLSFAllocator::Statistics TLSFAllocator::statistics(Pool pool) const noexcept {
     Statistics stats{};
-    if (!pool.mem || pool.bytes < pool_overhead()) return stats;
+    if (!pool.mem || pool.bytes < MIN_POOL_SIZE) return stats;
 
     const std::byte* begin = pool.mem;
     const std::uintptr_t end_addr = reinterpret_cast<std::uintptr_t>(pool.mem) + pool.bytes;
     const Block* block = reinterpret_cast<const Block*>(begin);
 
-    while (reinterpret_cast<std::uintptr_t>(block) + BLOCK_HEADER_OVERHEAD <= end_addr) {
+    while (reinterpret_cast<std::uintptr_t>(block) + BLOCK_HEADER_SIZE <= end_addr) {
         if (block_is_last(block)) break;
         ++stats.total_blocks;
         const std::size_t sz = block_size(block);
@@ -507,7 +502,7 @@ TLSFAllocator::Statistics TLSFAllocator::statistics(Pool pool) const noexcept {
 }
 
 bool TLSFAllocator::check_pool(Pool pool) const noexcept {
-    if (!pool.mem || pool.bytes < pool_overhead()) return false;
+    if (!pool.mem || pool.bytes < MIN_POOL_SIZE) return false;
     const std::uintptr_t begin_addr = reinterpret_cast<std::uintptr_t>(pool.mem);
     const std::uintptr_t end_addr = begin_addr + pool.bytes;
     if (end_addr < begin_addr) return false;
@@ -519,27 +514,27 @@ bool TLSFAllocator::check_pool(Pool pool) const noexcept {
         const std::uintptr_t block_addr = reinterpret_cast<std::uintptr_t>(block);
         
         // block out of range (begin,end) addr
-        if (block_addr < begin_addr || block_addr + BLOCK_HEADER_OVERHEAD > end_addr) return false;
+        if (block_addr < begin_addr || block_addr + BLOCK_HEADER_SIZE > end_addr) return false;
 
         // guards are maintained and incremented at each iteration to detect infinite loop
         if (++guard > pool.bytes / ALIGN_SIZE + 2) return false;
         if (reinterpret_cast<std::uintptr_t>(block_to_ptr(block)) % ALIGN_SIZE) return false;
         if (block_is_last(block)) {
             if (block_is_free(block)) return false;
-            return block_addr + BLOCK_HEADER_OVERHEAD <= end_addr &&
+            return block_addr + BLOCK_HEADER_SIZE <= end_addr &&
                    block_is_prev_free(block) == previous_free;
         }
 
         const std::size_t sz = block_size(block);
-        if (sz < BLOCK_SIZE_MIN || (sz % ALIGN_SIZE) != 0) return false;
+        if (sz < MIN_FREE_BLOCK_BODY_SIZE || (sz % ALIGN_SIZE) != 0) return false;
         if (block_is_prev_free(block) != previous_free) return false;
-        if (block_addr + BLOCK_HEADER_OVERHEAD + sz > end_addr) return false;
+        if (block_addr + BLOCK_HEADER_SIZE + sz > end_addr) return false;
 
         const Block* next = block_next(block);
         const std::uintptr_t next_addr = reinterpret_cast<std::uintptr_t>(next);
 
         // ensure next addr is valid wrt current block
-        if (next_addr <= block_addr || next_addr + BLOCK_HEADER_OVERHEAD > end_addr) return false;
+        if (next_addr <= block_addr || next_addr + BLOCK_HEADER_SIZE > end_addr) return false;
 
         if (block_is_free(block)) {
             
@@ -549,7 +544,7 @@ bool TLSFAllocator::check_pool(Pool pool) const noexcept {
             if (*block_footer(block) != sz) return false;
             if (!block_is_prev_free(next)) return false;
         } else {
-            // A used block has no valid footer. Its successor must agree with
+            // A used block has no valid footeer, its successor must agree with
             // the used state through prev free bit
             if (block_is_prev_free(next)) return false;
         }
@@ -584,7 +579,7 @@ bool TLSFAllocator::check() const noexcept {
                 if (b->prev_free != prev) return false;
                 if (b->next_free != &control_->block_null && b->next_free->prev_free != b) return false;
                 int f = 0, s = 0;
-                mapping_insert(block_size(b), f, s);
+                map_size_to_bucket(block_size(b), f, s);
                 if (f != static_cast<int>(fl) || s != static_cast<int>(sl)) return false;
                 if (*block_footer(b) != block_size(b)) return false;
                 prev = b;

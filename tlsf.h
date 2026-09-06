@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
-// C++20 TLSF allocator using caller-provided control storage and independent
+// TLSF allocator using caller-provided control storage and independent
 // caller-owned pools. The free-block physical predecessor is recovered from
 // a footer that exists only while the predecessor is free.
 class TLSFAllocator {
@@ -39,8 +39,8 @@ public:
     static constexpr std::size_t control_size() noexcept;
     static constexpr std::size_t control_alignment() noexcept;
 
-    // Pools are caller-owned. mem must be ALIGN_SIZE-aligned. The allocator
-    // neither allocates nor frees pool memory.
+    // pools are caller-owned. mem must be ALIGN_SIZE-aligned
+    // The allocator neither allocates nor frees pool memory.
     Pool add_pool(void* mem, std::size_t bytes) noexcept;
     bool remove_pool(Pool pool) noexcept;
 
@@ -49,24 +49,22 @@ public:
     void deallocate(void* ptr) noexcept;
     void* reallocate(void* ptr, std::size_t size) noexcept;
 
-    // O(number of physical blocks in the supplied pool). Diagnostic only.
+    // diagnostic only
     bool check_pool(Pool pool) const noexcept;
     Statistics statistics(Pool pool) const noexcept;
-
-    // O(number of free blocks in the global free lists). Diagnostic only.
     bool check() const noexcept;
 
     std::size_t usable_bytes(Pool pool) const noexcept;
     static std::size_t block_size(const void* ptr) noexcept;
 
     static constexpr std::size_t alignment() noexcept { return ALIGN_SIZE; }
-    static constexpr std::size_t block_size_minimum() noexcept { return BLOCK_SIZE_MIN; }
+    static constexpr std::size_t block_size_minimum() noexcept { return MIN_FREE_BLOCK_BODY_SIZE; }
     static constexpr std::size_t block_size_maximum() noexcept { return BLOCK_SIZE_MAX; }
-    static constexpr std::size_t allocation_overhead() noexcept { return BLOCK_HEADER_OVERHEAD; }
-    static constexpr std::size_t pool_overhead() noexcept { return 2 * BLOCK_HEADER_OVERHEAD; }
+    static constexpr std::size_t allocation_overhead() noexcept { return BLOCK_HEADER_SIZE; }
+    static constexpr std::size_t pool_overhead() noexcept { return POOL_OVERHEAD; }
 
 private:
-    // Only size is part of the permanently exposed header. next_free and
+    // only size is part of the permanently exposed header. next_free and
     // prev_free occupy the start of the user area while the block is free.
     struct Block {
         std::size_t size{};
@@ -74,12 +72,12 @@ private:
         Block* prev_free{};
     };
 
-    // AAA why these static asserts, given the structure above, ofcourse these will pass
+
     static_assert(sizeof(Block) == 3 * sizeof(void*));
     static_assert(offsetof(Block, size) == 0);
     static_assert(offsetof(Block, next_free) == sizeof(std::size_t));
     static_assert(sizeof(Block) % alignof(Block) == 0);
-// AAA just have a fixed 64 bit or 32 biit whatever we need
+
     static constexpr std::size_t ALIGN_LOG2 = (sizeof(void*) == 8) ? 3 : 2;
     static constexpr std::size_t ALIGN_SIZE = std::size_t{1} << ALIGN_LOG2;
     static constexpr std::size_t SL_INDEX_COUNT_LOG2 = 5;
@@ -89,19 +87,20 @@ private:
     static constexpr std::size_t FL_INDEX_COUNT = FL_INDEX_MAX - FL_INDEX_SHIFT + 1;
     static constexpr std::size_t SMALL_BLOCK_SIZE = std::size_t{1} << FL_INDEX_SHIFT;
 
-    // Physical blocks contain a one-word size field plus block_size bytes.
-    static constexpr std::size_t BLOCK_HEADER_OVERHEAD = sizeof(std::size_t);
-    static constexpr std::size_t BLOCK_START_OFFSET = sizeof(std::size_t);
+    // physical blocks contain a one-word size field plus block_size bytes.
+    static constexpr std::size_t BLOCK_HEADER_SIZE = sizeof(std::size_t);
+    static constexpr std::size_t BLOCK_START_OFFSET = BLOCK_HEADER_SIZE;
 
-    // A free block must hold next_free, prev_free and a footer.
-    // AAA free block would hold size in header as well as footer?
-    static constexpr std::size_t FREE_BLOCK_METADATA =
+    // a free block must hold next_free, prev_free and a footer.
+    static constexpr std::size_t FREE_BLOCK_BODY_METADATA =
         2 * sizeof(void*) + sizeof(std::size_t);
-    static constexpr std::size_t BLOCK_SIZE_MIN = FREE_BLOCK_METADATA;
+    static constexpr std::size_t MIN_FREE_BLOCK_BODY_SIZE = FREE_BLOCK_BODY_METADATA;
     static constexpr std::size_t BLOCK_SIZE_MAX = std::size_t{1} << FL_INDEX_MAX;
-    static constexpr std::size_t SPLIT_MIN_PHYSICAL =
-        BLOCK_HEADER_OVERHEAD + BLOCK_SIZE_MIN;
-    static constexpr std::size_t FREE_LEADING_GAP_MIN = SPLIT_MIN_PHYSICAL;
+    static constexpr std::size_t MIN_FREE_BLOCK_SIZE =
+        BLOCK_HEADER_SIZE + MIN_FREE_BLOCK_BODY_SIZE;
+    static constexpr std::size_t SENTINEL_SIZE = BLOCK_HEADER_SIZE;
+    static constexpr std::size_t POOL_OVERHEAD = BLOCK_HEADER_SIZE + SENTINEL_SIZE;
+    static constexpr std::size_t MIN_POOL_SIZE = MIN_FREE_BLOCK_SIZE + SENTINEL_SIZE;
 
     static constexpr std::size_t FREE_BIT = 1;
     static constexpr std::size_t PREV_FREE_BIT = 2;
@@ -144,18 +143,16 @@ private:
     static Block* block_prev(const Block* block) noexcept;
 
     static std::size_t adjust_request_size(std::size_t size, std::size_t align) noexcept;
-    static void mapping_insert(std::size_t size, int& fl, int& sl) noexcept;
-    static void mapping_search(std::size_t size, int& fl, int& sl) noexcept;
-    static int ffs32(std::uint32_t word) noexcept;
-    static int fls_size(std::size_t size) noexcept;
+    static void map_size_to_bucket(std::size_t size, int& fl, int& sl) noexcept;
+    static void map_rounded_size_to_bucket(std::size_t size, int& fl, int& sl) noexcept;
+    static int first_set_bit(std::uint32_t word) noexcept;
+    static int highest_set_bit(std::size_t size) noexcept;
 
     void control_construct() noexcept;
-    void insert_free(Block* block) noexcept;
-    void remove_free(Block* block, int fl, int sl) noexcept;
-    void block_insert(Block* block) noexcept;
-    void block_remove(Block* block) noexcept;
-    Block* search_suitable(int& fl, int& sl) noexcept;
-    Block* locate_free(std::size_t size) noexcept;
+    void block_insert_free(Block* block) noexcept;
+    void block_remove_free(Block* block) noexcept;
+    Block* find_next_nonempty_bucket(int& fl, int& sl) noexcept;
+    Block* find_free_block(std::size_t size) noexcept;
 
     static bool block_can_split(const Block* block, std::size_t size) noexcept;
     static Block* block_split(Block* block, std::size_t size) noexcept;
