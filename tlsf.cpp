@@ -8,6 +8,7 @@
 #include <limits>
 #include <new>
 
+// init allocator -> init the control struct using provided mem
 TLSFAllocator::TLSFAllocator(void* control_mem) noexcept {
     assert(control_mem);
     assert(reinterpret_cast<std::uintptr_t>(control_mem) % alignof(Control) == 0);
@@ -204,7 +205,7 @@ void TLSFAllocator::insert_free(Block* block) noexcept {
     control_->fl_bitmap |= (std::uint32_t{1} << fl);
     control_->sl_bitmap[fl] |= (std::uint32_t{1} << sl);
 }
-
+/// AAA refactoring required here 
 void TLSFAllocator::block_insert(Block* block) noexcept {
     insert_free(block);
 }
@@ -248,6 +249,7 @@ bool TLSFAllocator::block_can_split(const Block* block, std::size_t size) noexce
 TLSFAllocator::Block* TLSFAllocator::block_split(Block* block, std::size_t size) noexcept {
     const bool was_free = block_is_free(block);
     const std::size_t old_size = block_size(block);
+    // this is just block_can_split()
     assert(old_size >= size + SPLIT_MIN_PHYSICAL);
 
     Block* remaining = reinterpret_cast<Block*>(
@@ -343,6 +345,9 @@ void* TLSFAllocator::prepare_used(Block* block, std::size_t size) noexcept {
 
 TLSFAllocator::Pool TLSFAllocator::add_pool(void* mem, std::size_t bytes) noexcept {
     if (!mem) return {};
+    // as of now we require the mem to start at align size only
+    // otherwise we could have just aligned this up
+    // but then maybe this would be ugly for the user's side
     if (reinterpret_cast<std::uintptr_t>(mem) % ALIGN_SIZE) return {};
     if (bytes < pool_overhead()) return {};
 
@@ -383,9 +388,9 @@ void* TLSFAllocator::allocate_aligned(std::size_t bytes, std::size_t alignment) 
     const std::size_t adjust = adjust_request_size(bytes, ALIGN_SIZE);
     if (!adjust) return nullptr;
 
-    const std::size_t max = std::numeric_limits<std::size_t>::max();
-    if (alignment > max - FREE_LEADING_GAP_MIN) return nullptr;
-    if (adjust > max - alignment - FREE_LEADING_GAP_MIN) return nullptr;
+    const std::size_t max_size = std::numeric_limits<std::size_t>::max();
+    if (alignment > max_size - FREE_LEADING_GAP_MIN) return nullptr;
+    if (adjust > max_size - alignment - FREE_LEADING_GAP_MIN) return nullptr;
 
     const std::size_t size_with_gap =
         adjust_request_size(adjust + alignment + FREE_LEADING_GAP_MIN, alignment);
@@ -512,7 +517,11 @@ bool TLSFAllocator::check_pool(Pool pool) const noexcept {
 
     while (true) {
         const std::uintptr_t block_addr = reinterpret_cast<std::uintptr_t>(block);
+        
+        // block out of range (begin,end) addr
         if (block_addr < begin_addr || block_addr + BLOCK_HEADER_OVERHEAD > end_addr) return false;
+
+        // guards are maintained and incremented at each iteration to detect infinite loop
         if (++guard > pool.bytes / ALIGN_SIZE + 2) return false;
         if (reinterpret_cast<std::uintptr_t>(block_to_ptr(block)) % ALIGN_SIZE) return false;
         if (block_is_last(block)) {
@@ -528,15 +537,20 @@ bool TLSFAllocator::check_pool(Pool pool) const noexcept {
 
         const Block* next = block_next(block);
         const std::uintptr_t next_addr = reinterpret_cast<std::uintptr_t>(next);
+
+        // ensure next addr is valid wrt current block
         if (next_addr <= block_addr || next_addr + BLOCK_HEADER_OVERHEAD > end_addr) return false;
 
         if (block_is_free(block)) {
+            
+            // no coalescing
             if (block_is_free(next)) return false;
+            // footer check
             if (*block_footer(block) != sz) return false;
             if (!block_is_prev_free(next)) return false;
         } else {
             // A used block has no valid footer. Its successor must agree with
-            // the used state through PREV_FREE_BIT.
+            // the used state through prev free bit
             if (block_is_prev_free(next)) return false;
         }
 
@@ -560,8 +574,10 @@ bool TLSFAllocator::check() const noexcept {
             if (b == &control_->block_null) return false;
 
             const Block* prev = &control_->block_null;
+
             std::size_t guard = 0;
             while (b != &control_->block_null) {
+                // guards are maintained and incremented at each iteration to detect infinite loop
                 if (++guard > (std::size_t{1} << 26)) return false;
                 if (!block_is_free(b) || block_is_prev_free(b)) return false;
                 if (block_is_free(block_next(b))) return false;

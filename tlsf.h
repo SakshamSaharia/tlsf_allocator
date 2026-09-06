@@ -74,11 +74,12 @@ private:
         Block* prev_free{};
     };
 
+    // AAA why these static asserts, given the structure above, ofcourse these will pass
     static_assert(sizeof(Block) == 3 * sizeof(void*));
     static_assert(offsetof(Block, size) == 0);
     static_assert(offsetof(Block, next_free) == sizeof(std::size_t));
     static_assert(sizeof(Block) % alignof(Block) == 0);
-
+// AAA just have a fixed 64 bit or 32 biit whatever we need
     static constexpr std::size_t ALIGN_LOG2 = (sizeof(void*) == 8) ? 3 : 2;
     static constexpr std::size_t ALIGN_SIZE = std::size_t{1} << ALIGN_LOG2;
     static constexpr std::size_t SL_INDEX_COUNT_LOG2 = 5;
@@ -93,6 +94,7 @@ private:
     static constexpr std::size_t BLOCK_START_OFFSET = sizeof(std::size_t);
 
     // A free block must hold next_free, prev_free and a footer.
+    // AAA free block would hold size in header as well as footer?
     static constexpr std::size_t FREE_BLOCK_METADATA =
         2 * sizeof(void*) + sizeof(std::size_t);
     static constexpr std::size_t BLOCK_SIZE_MIN = FREE_BLOCK_METADATA;
