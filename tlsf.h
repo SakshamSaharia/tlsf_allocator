@@ -36,8 +36,13 @@ public:
     TLSFAllocator(TLSFAllocator&&) = delete;
     TLSFAllocator& operator=(TLSFAllocator&&) = delete;
 
-    static constexpr std::size_t control_size() noexcept;
-    static constexpr std::size_t control_alignment() noexcept;
+    constexpr std::size_t TLSFAllocator::control_size() noexcept {
+        return sizeof(Control);
+    }
+
+    constexpr std::size_t TLSFAllocator::control_alignment() noexcept {
+        return alignof(Control);
+    }
 
     // pools are caller-owned. mem must be ALIGN_SIZE-aligned
     // The allocator neither allocates nor frees pool memory.
@@ -165,10 +170,4 @@ private:
     void* prepare_used(Block* block, std::size_t size) noexcept;
 };
 
-constexpr std::size_t TLSFAllocator::control_size() noexcept {
-    return sizeof(Control);
-}
 
-constexpr std::size_t TLSFAllocator::control_alignment() noexcept {
-    return alignof(Control);
-}
