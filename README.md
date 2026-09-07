@@ -111,3 +111,4 @@ Run the benchmark:
 ./benchmark
 ```
 I saw an average of about 5% speedup than malloc/free, when run over 10 million ops
+Disclamer: This is an adapdation of @mattconte 's implementation
