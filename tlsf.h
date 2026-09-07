@@ -28,9 +28,11 @@ public:
 
     // control_mem must point to at least control_size() bytes aligned to
     // control_alignment(). The allocator does not own this storage.
+    // disable unexpected initialisation of allocator from void* by explict
     explicit TLSFAllocator(void* control_mem) noexcept;
     ~TLSFAllocator();
 
+    // moving and copying should be disallowed
     TLSFAllocator(const TLSFAllocator&) = delete;
     TLSFAllocator& operator=(const TLSFAllocator&) = delete;
     TLSFAllocator(TLSFAllocator&&) = delete;
