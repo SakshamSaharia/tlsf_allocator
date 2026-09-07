@@ -110,3 +110,4 @@ Run the benchmark:
 ```bash
 ./benchmark
 ```
+I saw an average of about 5% speedup than malloc/free, when run over 10 million ops

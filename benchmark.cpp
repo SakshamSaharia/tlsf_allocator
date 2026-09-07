@@ -82,6 +82,6 @@ int main() {
     for (int r = 0; r < 5; ++r) {
         const double tlsf = run_tlsf(ops, seed + r);
         const double libc = run_malloc(ops, seed + r);
-        std::printf("run %d: cpp_tlsf %.3f ms, malloc/free %.3f ms\n", r + 1, tlsf, libc);
+        std::printf("run %d: tlsf %.3f ms, malloc/free %.3f ms\n", r + 1, tlsf, libc);
     }
 }
