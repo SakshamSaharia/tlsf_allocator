@@ -19,6 +19,7 @@ struct Buffer {
     ~Buffer() { std::free(raw); }
 };
 
+// make a random generator from seed which is same across runs
 static std::uint64_t state;
 static inline std::uint64_t rng64() { state ^= state << 7; state ^= state >> 9; state ^= state << 8; return state; }
 
