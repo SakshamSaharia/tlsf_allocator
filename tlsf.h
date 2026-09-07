@@ -36,11 +36,11 @@ public:
     TLSFAllocator(TLSFAllocator&&) = delete;
     TLSFAllocator& operator=(TLSFAllocator&&) = delete;
 
-    constexpr std::size_t TLSFAllocator::control_size() noexcept {
+    static constexpr std::size_t TLSFAllocator::control_size() noexcept {
         return sizeof(Control);
     }
 
-    constexpr std::size_t TLSFAllocator::control_alignment() noexcept {
+    static constexpr std::size_t TLSFAllocator::control_alignment() noexcept {
         return alignof(Control);
     }
 
