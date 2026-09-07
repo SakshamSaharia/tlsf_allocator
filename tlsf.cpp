@@ -1,4 +1,4 @@
-#include "tlsf.hpp"
+#include "tlsf.h"
 
 #include <algorithm>
 #include <bit>
@@ -458,7 +458,7 @@ void* TLSFAllocator::reallocate(void* ptr, std::size_t size) noexcept {
         merge_next(block);
         // the successor used to have prev free bit set because the absorbed
         // block was free.
-        // the enlarged block is now used.
+        // the enlarged block is now used
         block_set_prev_used(block_next(block));
         block_set_used(block);
     }
