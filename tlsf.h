@@ -12,9 +12,6 @@ public:
     struct Pool {
         std::byte* mem{};
         std::size_t bytes{};
-        friend constexpr bool operator==(Pool a, Pool b) noexcept {
-            return a.mem == b.mem && a.bytes == b.bytes;
-        }
     };
 
     struct Statistics {
