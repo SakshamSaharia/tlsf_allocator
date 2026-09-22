@@ -35,11 +35,11 @@ public:
     TLSFAllocator(TLSFAllocator&&) = delete;
     TLSFAllocator& operator=(TLSFAllocator&&) = delete;
 
-    static constexpr std::size_t TLSFAllocator::control_size() noexcept {
+    static constexpr std::size_t control_size() noexcept {
         return sizeof(Control);
     }
 
-    static constexpr std::size_t TLSFAllocator::control_alignment() noexcept {
+    static constexpr std::size_t control_alignment() noexcept {
         return alignof(Control);
     }
 
@@ -82,12 +82,12 @@ private:
     static_assert(offsetof(Block, next_free) == sizeof(std::size_t));
     static_assert(sizeof(Block) % alignof(Block) == 0);
 
-    static constexpr std::size_t ALIGN_LOG2 = (sizeof(void*) == 8) ? 3 : 2;
+    static constexpr std::size_t ALIGN_LOG2 = 3;
     static constexpr std::size_t ALIGN_SIZE = std::size_t{1} << ALIGN_LOG2;
     static constexpr std::size_t SL_INDEX_COUNT_LOG2 = 5;
     static constexpr std::size_t SL_INDEX_COUNT = std::size_t{1} << SL_INDEX_COUNT_LOG2;
     static constexpr std::size_t FL_INDEX_SHIFT = SL_INDEX_COUNT_LOG2 + ALIGN_LOG2;
-    static constexpr std::size_t FL_INDEX_MAX = (sizeof(void*) == 8) ? 32 : 30;
+    static constexpr std::size_t FL_INDEX_MAX = 32;
     static constexpr std::size_t FL_INDEX_COUNT = FL_INDEX_MAX - FL_INDEX_SHIFT + 1;
     static constexpr std::size_t SMALL_BLOCK_SIZE = std::size_t{1} << FL_INDEX_SHIFT;
 
@@ -168,5 +168,3 @@ private:
     Block* trim_free_leading(Block* block, std::size_t size) noexcept;
     void* prepare_used(Block* block, std::size_t size) noexcept;
 };
-
-

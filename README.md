@@ -2,6 +2,9 @@
 
 An implementation of the Two-Level Segregated Fit (TLSF) memory allocation algorithm.
 
+This implementation targets a 64-bit ABI directly: pointers, `std::size_t`, and
+`std::uintptr_t` are expected to be 8 bytes. The allocator's minimum alignment is 8 bytes.
+
 The allocator uses caller-provided control storage and caller-owned memory pools. It supports
 allocation, deallocation, aligned allocation, reallocation, multiple pools, and basic
 consistency/statistics checks. Free blocks use segregated free lists and bitmaps for fast lookup,
@@ -115,4 +118,6 @@ I saw an average of about 5% speedup than malloc/free, when run over 10 million 
 
 The implementation is mostly c++17, although I used some C++20 features for bit functionalities 
 
-Disclamer: This is an adapdation of @mattconte 's implementation
+Here the memory pools are user specified which violates RAII, but makes per-pool testing more comprehensive and easier to reason about.
+
+Disclamer: This is primarly an adapdation of @mattconte 's implementation

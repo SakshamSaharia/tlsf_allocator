@@ -19,7 +19,7 @@ struct Buffer {
     void* mem{};
     std::size_t bytes{};
 
-    explicit Buffer(std::size_t n, std::size_t align = 8) : bytes(n) {
+    explicit Buffer(std::size_t n, std::size_t align = TLSFAllocator::alignment()) : bytes(n) {
         raw = static_cast<std::byte*>(std::malloc(n + align));
         assert(raw);
         const auto base = reinterpret_cast<std::uintptr_t>(raw);
