@@ -112,5 +112,7 @@ Run the benchmark:
 ```
 ## Side Notes
 I saw an average of about 5% speedup than malloc/free, when run over 10 million ops.
+
 The implementation is mostly c++17, although I used some C++20 features for bit functionalities 
+
 Disclamer: This is an adapdation of @mattconte 's implementation
