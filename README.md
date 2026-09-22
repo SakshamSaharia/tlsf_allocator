@@ -1,6 +1,6 @@
 # TLSF Memory Allocator
 
-A C++20 implementation of the **Two-Level Segregated Fit (TLSF)** memory allocation algorithm.
+An implementation of the Two-Level Segregated Fit (TLSF) memory allocation algorithm.
 
 The allocator uses caller-provided control storage and caller-owned memory pools. It supports
 allocation, deallocation, aligned allocation, reallocation, multiple pools, and basic
@@ -110,6 +110,7 @@ Run the benchmark:
 ```bash
 ./benchmark
 ```
+## Side Notes
 I saw an average of about 5% speedup than malloc/free, when run over 10 million ops.
-
+The implementation is mostly c++17, although I used some C++20 features for bit functionalities 
 Disclamer: This is an adapdation of @mattconte 's implementation
