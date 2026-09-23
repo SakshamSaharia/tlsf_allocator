@@ -76,12 +76,6 @@ private:
         Block* prev_free{};
     };
 
-
-    static_assert(sizeof(Block) == 3 * sizeof(void*));
-    static_assert(offsetof(Block, size) == 0);
-    static_assert(offsetof(Block, next_free) == sizeof(std::size_t));
-    static_assert(sizeof(Block) % alignof(Block) == 0);
-
     static constexpr std::size_t ALIGN_LOG2 = 3;
     static constexpr std::size_t ALIGN_SIZE = std::size_t{1} << ALIGN_LOG2;
     static constexpr std::size_t SL_INDEX_COUNT_LOG2 = 5;

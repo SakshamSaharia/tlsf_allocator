@@ -16,6 +16,14 @@ TLSFAllocator::TLSFAllocator(void* control_mem) noexcept {
     control_construct();
 }
 
+void TLSFAllocator::control_construct() noexcept {
+    control_->block_null.next_free = &control_->block_null;
+    control_->block_null.prev_free = &control_->block_null;
+    control_->fl_bitmap = 0;
+    for (auto& row : control_->blocks) row.fill(&control_->block_null);
+    control_->sl_bitmap.fill(0);
+}
+
 TLSFAllocator::~TLSFAllocator() {
     assert(control_);
     control_->~Control();
@@ -164,14 +172,6 @@ void TLSFAllocator::map_rounded_size_to_bucket(std::size_t size, int& fl, int& s
         }
     }
     map_size_to_bucket(size, fl, sl);
-}
-
-void TLSFAllocator::control_construct() noexcept {
-    control_->block_null.next_free = &control_->block_null;
-    control_->block_null.prev_free = &control_->block_null;
-    control_->fl_bitmap = 0;
-    for (auto& row : control_->blocks) row.fill(&control_->block_null);
-    control_->sl_bitmap.fill(0);
 }
 
 void TLSFAllocator::block_insert_free(Block* block) noexcept {
