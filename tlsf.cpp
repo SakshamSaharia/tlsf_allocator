@@ -107,6 +107,7 @@ const TLSFAllocator::Block* TLSFAllocator::block_next(const Block* block) noexce
                                           BLOCK_HEADER_SIZE + block_size(block));
 }
 
+// block footer is just a size_t object storing size 
 std::size_t* TLSFAllocator::block_footer(Block* block) noexcept {
     return reinterpret_cast<std::size_t*>(reinterpret_cast<std::byte*>(block_to_ptr(block)) +
                                           block_size(block) - sizeof(std::size_t));
@@ -122,13 +123,22 @@ void TLSFAllocator::write_footer(Block* block) noexcept {
     *block_footer(block) = block_size(block);
 }
 
-TLSFAllocator::Block* TLSFAllocator::block_prev(const Block* block) noexcept {
+TLSFAllocator::Block* TLSFAllocator::block_prev(Block* block) noexcept {
     assert(block_is_prev_free(block));
     const std::size_t previous_size = *reinterpret_cast<const std::size_t*>(
         reinterpret_cast<const std::byte*>(block) - sizeof(std::size_t));
     assert(previous_size >= MIN_FREE_BLOCK_BODY_SIZE);
-    return reinterpret_cast<Block*>(reinterpret_cast<std::byte*>(const_cast<Block*>(block)) -
+    return reinterpret_cast<Block*>(reinterpret_cast<std::byte*>(block) -
                                     BLOCK_HEADER_SIZE - previous_size);
+}
+
+const TLSFAllocator::Block* TLSFAllocator::block_prev(const Block* block) noexcept {
+    assert(block_is_prev_free(block));
+    const std::size_t previous_size = *reinterpret_cast<const std::size_t*>(
+        reinterpret_cast<const std::byte*>(block) - sizeof(std::size_t));
+    assert(previous_size >= MIN_FREE_BLOCK_BODY_SIZE);
+    return reinterpret_cast<const Block*>(reinterpret_cast<const std::byte*>(block) -
+                                          BLOCK_HEADER_SIZE - previous_size);
 }
 
 std::size_t TLSFAllocator::adjust_request_size(std::size_t size, std::size_t align) noexcept {

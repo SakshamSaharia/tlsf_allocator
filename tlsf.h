@@ -137,7 +137,8 @@ private:
     static std::size_t* block_footer(Block* block) noexcept;
     static const std::size_t* block_footer(const Block* block) noexcept;
     static void write_footer(Block* block) noexcept;
-    static Block* block_prev(const Block* block) noexcept;
+    static Block* block_prev(Block* block) noexcept;
+    static const Block* block_prev(const Block* block) noexcept;
 
     static std::size_t adjust_request_size(std::size_t size, std::size_t align) noexcept;
     static void map_size_to_bucket(std::size_t size, int& fl, int& sl) noexcept;
