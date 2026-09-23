@@ -215,6 +215,7 @@ void TLSFAllocator::block_remove_free(Block* block) noexcept {
     next->prev_free = prev;
     prev->next_free = next;
 
+    // if the block is head then update head to next, otherwise done
     if (control_->blocks[fl][sl] == block) {
         control_->blocks[fl][sl] = next;
         if (next == &control_->block_null) {
@@ -259,8 +260,7 @@ bool TLSFAllocator::block_can_split(const Block* block, std::size_t size) noexce
 TLSFAllocator::Block* TLSFAllocator::block_split(Block* block, std::size_t size) noexcept {
     const bool was_free = block_is_free(block);
     const std::size_t old_size = block_size(block);
-    // this is just block_can_split()
-    assert(old_size >= size + MIN_FREE_BLOCK_SIZE);
+    assert(block_can_split(block,size));
 
     Block* remaining = reinterpret_cast<Block*>(
         reinterpret_cast<std::byte*>(block) + BLOCK_HEADER_SIZE + size);
@@ -327,16 +327,27 @@ void TLSFAllocator::trim_used(Block* block, std::size_t size) noexcept {
     if (block_can_split(block, size)) {
         Block* remaining = block_split(block, size);
         block_set_prev_used(remaining);
+        // here we have freed the memory occupied by the remaining block, so merge
         remaining = merge_next(remaining);
         block_insert_free(remaining);
     }
 }
 
-TLSFAllocator::Block* TLSFAllocator::trim_free_leading(Block* block, std::size_t size) noexcept {
+TLSFAllocator::Block* TLSFAllocator::trim_free_leading(Block* block, std::size_t gap) noexcept {
     Block* remaining = block;
-    if (block_can_split(block, size)) {
-        remaining = block_split(block, size - BLOCK_HEADER_SIZE);
-        block_set_prev_used(block);
+    const std::size_t leading_size = gap - BLOCK_HEADER_SIZE;
+    
+    if (block_can_split(block, leading_size)) {
+        const bool prev_free = block_is_prev_free(block);
+        remaining = block_split(block, leading_size);
+
+        if(prev_free){
+            block_set_prev_free(block);
+        }
+        else{
+            block_set_prev_used(block);
+        }
+        
         block_set_prev_free(remaining);
         block_insert_free(block);
     }
@@ -399,9 +410,12 @@ void* TLSFAllocator::allocate_aligned(std::size_t bytes, std::size_t alignment) 
     if (!adjust) return nullptr;
 
     const std::size_t max_size = std::numeric_limits<std::size_t>::max();
+    // checks to prevent size_t overflow
     if (alignment > max_size - MIN_FREE_BLOCK_SIZE) return nullptr;
     if (adjust > max_size - alignment - MIN_FREE_BLOCK_SIZE) return nullptr;
 
+    // whatever memory is present in gap must be reclaimable later
+    // thus must be enough to be represented in a free block
     const std::size_t size_with_gap =
         adjust_request_size(adjust + alignment + MIN_FREE_BLOCK_SIZE, alignment);
     if (!size_with_gap) return nullptr;
@@ -414,6 +428,7 @@ void* TLSFAllocator::allocate_aligned(std::size_t bytes, std::size_t alignment) 
     std::uintptr_t aligned_addr = align_ptr(reinterpret_cast<std::uintptr_t>(ptr), alignment);
     std::size_t gap = static_cast<std::size_t>(aligned_addr - reinterpret_cast<std::uintptr_t>(ptr));
 
+    // if gap is unclaimable by free block, then advance the aligned address
     if (gap && gap < MIN_FREE_BLOCK_SIZE) {
         const std::size_t gap_remain = MIN_FREE_BLOCK_SIZE - gap;
         const std::size_t offset = std::max(gap_remain, alignment);
