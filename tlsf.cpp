@@ -159,7 +159,11 @@ void TLSFAllocator::map_size_to_bucket(std::size_t size, int& fl, int& sl) noexc
 }
 
 void TLSFAllocator::map_rounded_size_to_bucket(std::size_t size, int& fl, int& sl) noexcept {
-    if (size >= SMALL_BLOCK_SIZE) {
+    
+    if(size< SMALL_BLOCK_SIZE){
+        const std::size_t round = (SMALL_BLOCK_SIZE/SL_INDEX_COUNT)-1;
+        size = (size+round) & ~round;
+    } else{
         const int shift = highest_set_bit(size) - SL_INDEX_COUNT_LOG2;
         if (shift >= 0) {
             const std::size_t round = (std::size_t{1} << shift) - 1;

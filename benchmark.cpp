@@ -78,7 +78,7 @@ static double run_malloc(int ops, std::uint64_t seed) {
 
 int main() {
     constexpr int ops = 10'000'000;
-    constexpr std::uint64_t seed = 0xC0FFEEULL;
+    constexpr std::uint64_t seed = 0xCEFFEEULL;
     for (int r = 0; r < 5; ++r) {
         const double tlsf = run_tlsf(ops, seed + r);
         const double libc = run_malloc(ops, seed + r);

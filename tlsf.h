@@ -85,11 +85,10 @@ private:
     static constexpr std::size_t FL_INDEX_COUNT = FL_INDEX_MAX - FL_INDEX_SHIFT + 1;
     static constexpr std::size_t SMALL_BLOCK_SIZE = std::size_t{1} << FL_INDEX_SHIFT;
 
-    // physical blocks contain a one-word size field plus block_size bytes.
     static constexpr std::size_t BLOCK_HEADER_SIZE = sizeof(std::size_t);
     static constexpr std::size_t BLOCK_START_OFFSET = BLOCK_HEADER_SIZE;
 
-    // a free block must hold next_free, prev_free and a footer.
+    // a free block metadata (excluding size) must hold next_free, prev_free and a footer.
     static constexpr std::size_t FREE_BLOCK_BODY_METADATA =
         2 * sizeof(void*) + sizeof(std::size_t);
     static constexpr std::size_t MIN_FREE_BLOCK_BODY_SIZE = FREE_BLOCK_BODY_METADATA;
