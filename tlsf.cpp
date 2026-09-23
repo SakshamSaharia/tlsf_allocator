@@ -469,11 +469,14 @@ void* TLSFAllocator::reallocate(void* ptr, std::size_t size) noexcept {
     Block* next = block_next(block);
     const std::size_t cursize = block_size(block);
     const std::size_t next_size = block_size(next);
+
+    // check to prevent size_t overflow
     assert(cursize <= std::numeric_limits<std::size_t>::max() - next_size - BLOCK_HEADER_SIZE);
     const std::size_t combined = cursize + next_size + BLOCK_HEADER_SIZE;
     const std::size_t adjust = adjust_request_size(size, ALIGN_SIZE);
     if (!adjust) return nullptr;
 
+    // if this block can't be extended, copy into a new location 
     if (adjust > cursize && (!block_is_free(next) || adjust > combined)) {
         void* p = allocate(size);
         if (p) {
@@ -483,11 +486,11 @@ void* TLSFAllocator::reallocate(void* ptr, std::size_t size) noexcept {
         return p;
     }
 
+    // if block can be merged with next block to get enough space
     if (adjust > cursize) {
         merge_next(block);
-        // the successor used to have prev free bit set because the absorbed
-        // block was free.
-        // the enlarged block is now used
+        /* the successor used to have prev free bit set because the absorbed
+        block was free. the enlarged block is now used */
         block_set_prev_used(block_next(block));
         block_set_used(block);
     }
@@ -537,6 +540,8 @@ bool TLSFAllocator::check_pool(Pool pool) const noexcept {
     if (end_addr < begin_addr) return false;
     const Block* block = reinterpret_cast<const Block*>(pool.mem);
     bool previous_free = false;
+
+    // guards are incremented at each iteration to detect infinite loop
     std::size_t guard = 0;
 
     while (true) {
@@ -544,8 +549,7 @@ bool TLSFAllocator::check_pool(Pool pool) const noexcept {
         
         // block out of range (begin,end) addr
         if (block_addr < begin_addr || block_addr + BLOCK_HEADER_SIZE > end_addr) return false;
-
-        // guards are maintained and incremented at each iteration to detect infinite loop
+        // increment guard
         if (++guard > pool.bytes / ALIGN_SIZE + 2) return false;
         if (reinterpret_cast<std::uintptr_t>(block_to_ptr(block)) % ALIGN_SIZE) return false;
         if (block_is_last(block)) {
@@ -573,7 +577,7 @@ bool TLSFAllocator::check_pool(Pool pool) const noexcept {
             if (*block_footer(block) != sz) return false;
             if (!block_is_prev_free(next)) return false;
         } else {
-            // A used block has no valid footeer, its successor must agree with
+            // A used block has no valid footer, its successor must agree with
             // the used state through prev free bit
             if (block_is_prev_free(next)) return false;
         }
@@ -599,9 +603,9 @@ bool TLSFAllocator::check() const noexcept {
 
             const Block* prev = &control_->block_null;
 
+            // guards are incremented at each iteration to detect infinite loop
             std::size_t guard = 0;
-            while (b != &control_->block_null) {
-                // guards are maintained and incremented at each iteration to detect infinite loop
+            while (b != &control_->block_null) { 
                 if (++guard > (std::size_t{1} << 26)) return false;
                 if (!block_is_free(b) || block_is_prev_free(b)) return false;
                 if (block_is_free(block_next(b))) return false;

@@ -28,27 +28,29 @@ static double run_tlsf(int ops, std::uint64_t seed) {
     std::vector<void*> live;
     live.reserve(ops / 2);
     auto t0 = std::chrono::steady_clock::now();
-    Buffer control(TLSFAllocator::control_size(), TLSFAllocator::control_alignment());
-    Buffer pool(256ull << 20);
-    TLSFAllocator a(control.mem);
-    auto p = a.add_pool(pool.mem, 256ull << 20);
-    if (!p.mem) std::abort();
-    
-    
-    for (int i = 0; i < ops; ++i) {
-        if (live.empty() || (rng64() % 100) < 50) {
-            auto n = 1 + rng64() % 4096;
-            void* q = a.allocate(n);
-            if (!q) std::abort();
-            live.push_back(q);
-        } else {
-            auto j = rng64() % live.size();
-            a.deallocate(live[j]);
-            live[j] = live.back();
-            live.pop_back();
+    // include allocation and deallocation of pools and metadata while measuring time
+    {
+        Buffer control(TLSFAllocator::control_size(), TLSFAllocator::control_alignment());
+        Buffer pool(256ull << 20);
+        TLSFAllocator a(control.mem);
+        auto p = a.add_pool(pool.mem, 256ull << 20);
+        if (!p.mem) std::abort();
+
+        for (int i = 0; i < ops; ++i) {
+            if (live.empty() || (rng64() % 100) < 50) {
+                auto n = 1 + rng64() % 4096;
+                void* q = a.allocate(n);
+                if (!q) std::abort();
+                live.push_back(q);
+            } else {
+                auto j = rng64() % live.size();
+                a.deallocate(live[j]);
+                live[j] = live.back();
+                live.pop_back();
+            }
         }
+        for (void* q : live) a.deallocate(q);
     }
-    for (void* q : live) a.deallocate(q);
     auto t1 = std::chrono::steady_clock::now();
     return std::chrono::duration<double, std::milli>(t1 - t0).count();
 }
