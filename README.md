@@ -120,4 +120,9 @@ The implementation is mostly c++17, although I used some C++20 features for bit 
 
 Here the memory pools are user specified which violates RAII, but makes per-pool testing more comprehensive and easier to reason about.
 
-Disclamer: This is primarly an adapdation of @mattconte 's implementation
+Why TLSF against simple segregated list: with segregated list, if we follow the same
+index for fl, then in the worst case, there might be a block nearly double of the requested size but we might reject the request. But with TLSF that near 100% margin reduces to about 6% of the request size since the next range is (1/2^5) extra of the current fl range. Which makes this a "good-fit" allocator 
+
+One addition I thought of -> we can make a fast allocator for fixed small block sizes of 8,16 bytes where we come up with a mechanism so that we dont spend metadata overhead of storing size, like a fixed size slab allocator.
+
+Disclamer: This is primarly an adapdation of @mattconte 's implementation, with some changes ofcourse
